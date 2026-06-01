@@ -1,0 +1,608 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>AutoService — Sprinter Express</title>
+<script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+<script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+<script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { background: #0f1117; font-family: 'Segoe UI', sans-serif; color: #e2e8f0; }
+  input, select, textarea { outline: none; font-family: inherit; }
+  ::-webkit-scrollbar { width: 4px; }
+  ::-webkit-scrollbar-track { background: #1a1d2e; }
+  ::-webkit-scrollbar-thumb { background: #2d3148; border-radius: 4px; }
+</style>
+</head>
+<body>
+<div id="root"></div>
+<script type="text/babel">
+
+const { useState, useRef } = React;
+
+const SC = { "Waiting": "#f59e0b", "In Progress": "#3b82f6", "Done": "#22c55e", "Cancelled": "#ef4444" };
+const NEXT = { "Waiting": "In Progress", "In Progress": "Done" };
+const NEXT_LABEL = { "Waiting": "▶ Start Work", "In Progress": "✅ Mark Done" };
+
+const initOrders = [
+  { id: 1, date: "2026-06-03", customer: "Alex Peterson", car: "Toyota Camry 2019", vin: "4T1BF1FK8HU123456", technician: "Victor Zakharov", hours: 3.5, partsCost: 116.25, status: "In Progress", insuranceConfirmed: true, description: "Full service + brake pads replacement" },
+  { id: 2, date: "2026-06-05", customer: "Maria Johnson", car: "BMW X5 2021", vin: "5UXCR6C08M9E12345", technician: "Andrew Cooper", hours: 0, partsCost: 84.00, status: "Waiting", insuranceConfirmed: true, description: "Oil change + inspection" },
+];
+const initParts = [
+  { id: 1, name: "Oil Filter", sku: "OF-2234", stock: 12, price: 8.50, category: "Engine" },
+  { id: 2, name: "Brake Pads (Front)", sku: "BP-F441", stock: 5, price: 34.99, category: "Brakes" },
+  { id: 3, name: "Air Filter", sku: "AF-1102", stock: 8, price: 12.00, category: "Engine" },
+  { id: 4, name: "Spark Plugs (x4)", sku: "SP-0044", stock: 20, price: 18.75, category: "Ignition" },
+  { id: 5, name: "Wiper Blades", sku: "WB-3310", stock: 2, price: 22.00, category: "Body" },
+];
+const initTechs = [
+  { id: 1, name: "Victor Zakharov", specialty: "Engine & Transmission", phone: "+1 555 100 2233", active: true, ordersToday: 1 },
+  { id: 2, name: "Andrew Cooper", specialty: "Brakes & Suspension", phone: "+1 555 300 4455", active: true, ordersToday: 1 },
+  { id: 3, name: "Sofia Lee", specialty: "Electrical Systems", phone: "+1 555 500 6677", active: false, ordersToday: 0 },
+];
+const initCustomers = [
+  { id: 1, name: "Alex Peterson", phone: "+1 555 210 3344", email: "alex.p@email.com", cars: "Toyota Camry 2019", visits: 3 },
+  { id: 2, name: "Maria Johnson", phone: "+1 555 874 2211", email: "maria.j@email.com", cars: "BMW X5 2021", visits: 1 },
+  { id: 3, name: "James Kim", phone: "+1 555 330 9900", email: "jkim@email.com", cars: "Honda Accord 2018", visits: 5 },
+];
+
+// ── UI primitives ──────────────────────────────────────
+function Btn({ children, onClick, color = "#2563eb", small, full, style = {} }) {
+  return <button onClick={onClick} style={{
+    background: color, color: "#fff", border: "none", borderRadius: 8,
+    padding: small ? "6px 12px" : "9px 16px", cursor: "pointer",
+    fontWeight: 600, fontSize: small ? 12 : 13,
+    width: full ? "100%" : undefined, ...style
+  }}>{children}</button>;
+}
+
+function Field({ label, value, onChange, type = "text", placeholder, options }) {
+  const base = { width: "100%", background: "#0f1117", border: "1px solid #2d3148", borderRadius: 8, padding: "10px 12px", color: "#e2e8f0", fontSize: 13 };
+  return (
+    <div style={{ marginBottom: 12 }}>
+      {label && <div style={{ fontSize: 11, color: "#94a3b8", marginBottom: 4 }}>{label}</div>}
+      {options
+        ? <select value={value} onChange={e => onChange(e.target.value)} style={base}>
+            <option value="">Select...</option>
+            {options.map(o => <option key={o} value={o}>{o}</option>)}
+          </select>
+        : <input type={type} value={value} onChange={e => onChange(e.target.value)}
+            placeholder={placeholder} style={base} />
+      }
+    </div>
+  );
+}
+
+function Modal({ title, onClose, children, wide }) {
+  return (
+    <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.75)", zIndex: 200, display: "flex", alignItems: "flex-end", justifyContent: "center" }}
+         onClick={e => e.target === e.currentTarget && onClose()}>
+      <div style={{ background: "#1a1d2e", borderRadius: "16px 16px 0 0", width: "100%", maxWidth: wide ? 600 : 480, padding: 20, maxHeight: "92vh", overflowY: "auto" }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
+          <div style={{ fontWeight: 700, fontSize: 16 }}>{title}</div>
+          <button onClick={onClose} style={{ background: "#2d3148", border: "none", color: "#94a3b8", borderRadius: 8, padding: "4px 12px", cursor: "pointer", fontSize: 16 }}>✕</button>
+        </div>
+        {children}
+      </div>
+    </div>
+  );
+}
+
+function Confirm({ message, onYes, onNo }) {
+  return (
+    <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.8)", zIndex: 300, display: "flex", alignItems: "center", justifyContent: "center", padding: 20 }}>
+      <div style={{ background: "#1a1d2e", borderRadius: 16, padding: 24, maxWidth: 320, width: "100%", textAlign: "center" }}>
+        <div style={{ fontSize: 32, marginBottom: 12 }}>⚠️</div>
+        <div style={{ fontSize: 14, marginBottom: 20, color: "#e2e8f0", lineHeight: 1.6 }}>{message}</div>
+        <div style={{ display: "flex", gap: 10 }}>
+          <Btn onClick={onNo} color="#374151" full>Cancel</Btn>
+          <Btn onClick={onYes} color="#ef4444" full>Delete</Btn>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ── Invoice ────────────────────────────────────────────
+function Invoice({ order, hourlyRate, onClose }) {
+  const labor = order.hours * hourlyRate;
+  const total = labor + order.partsCost;
+  const handlePrint = () => {
+    const w = window.open("", "_blank");
+    w.document.write(`<!DOCTYPE html><html><head><title>Invoice #${order.id}</title>
+    <style>body{font-family:Arial,sans-serif;max-width:640px;margin:40px auto;color:#111;padding:20px;}
+    .hdr{text-align:center;border-bottom:2px solid #111;padding-bottom:16px;margin-bottom:20px;}
+    .shop{font-size:22px;font-weight:bold;}.lbl{font-size:11px;color:#888;text-transform:uppercase;letter-spacing:1px;margin-bottom:8px;margin-top:16px;}
+    .row{display:flex;justify-content:space-between;padding:6px 0;border-bottom:1px solid #eee;font-size:14px;}
+    .tot{display:flex;justify-content:space-between;padding:12px 0;font-size:20px;font-weight:bold;border-top:3px solid #111;margin-top:8px;}
+    .dis{background:#fff8e1;border:2px solid #f59e0b;border-radius:8px;padding:14px;margin-top:24px;font-size:12px;line-height:1.7;}
+    .footer{text-align:center;font-size:10px;color:#aaa;margin-top:24px;padding-top:12px;border-top:1px solid #eee;}</style>
+    </head><body>
+    <div class="hdr"><div class="shop">🔧 SPRINTER EXPRESS AUTO SERVICE</div><div style="font-size:12px;color:#666;margin-top:4px;">Professional Auto Repair</div></div>
+    <div class="lbl">Invoice Info</div>
+    <div class="row"><span>Invoice #</span><span>${order.id}</span></div>
+    <div class="row"><span>Date</span><span>${order.date}</span></div>
+    <div class="row"><span>Status</span><span>${order.status}</span></div>
+    <div class="lbl">Customer & Vehicle</div>
+    <div class="row"><span>Customer</span><span>${order.customer}</span></div>
+    <div class="row"><span>Vehicle</span><span>${order.car}</span></div>
+    <div class="row"><span>VIN</span><span>${order.vin}</span></div>
+    <div class="row"><span>Technician</span><span>${order.technician}</span></div>
+    <div class="lbl">Services</div>
+    <p style="font-size:14px;margin:8px 0 12px;">${order.description || "Auto repair service"}</p>
+    <div class="row"><span>Labor (${order.hours}h × $${hourlyRate}/h)</span><span>$${labor.toFixed(2)}</span></div>
+    <div class="row"><span>Parts & Materials</span><span>$${order.partsCost.toFixed(2)}</span></div>
+    <div class="tot"><span>TOTAL DUE</span><span>$${total.toFixed(2)}</span></div>
+    <div class="dis"><strong>⚠️ INSURANCE & LIABILITY DISCLAIMER</strong><br/>The vehicle owner is required to maintain valid insurance at all times. <strong>Sprinter Express Auto Service bears NO responsibility for any damage, theft, or loss</strong> of the vehicle or its contents while on the premises. By leaving your vehicle, the owner accepts this policy.</div>
+    <div class="footer">Thank you for choosing Sprinter Express Auto Service<br/>Design by Anatoliy Ostapenko · For Sprinter Express only</div>
+    </body></html>`);
+    w.document.close(); w.focus(); setTimeout(() => w.print(), 400);
+  };
+  return (
+    <Modal title="🧾 Invoice" onClose={onClose}>
+      <div style={{ background: "#0f1117", borderRadius: 10, padding: 14, marginBottom: 10 }}>
+        <div style={{ fontSize: 10, color: "#64748b", textTransform: "uppercase", letterSpacing: 1, marginBottom: 6 }}>Sprinter Express Auto Service</div>
+        <div style={{ fontWeight: 700, fontSize: 16 }}>{order.customer}</div>
+        <div style={{ fontSize: 13, color: "#94a3b8", marginTop: 2 }}>{order.car}</div>
+        <div style={{ fontSize: 11, color: "#64748b" }}>VIN: {order.vin}</div>
+        <div style={{ fontSize: 11, color: "#64748b", marginTop: 2 }}>Date: {order.date} · Order #{order.id} · {order.technician}</div>
+      </div>
+      <div style={{ background: "#0f1117", borderRadius: 10, padding: 14, marginBottom: 10 }}>
+        <div style={{ fontSize: 10, color: "#64748b", textTransform: "uppercase", letterSpacing: 1, marginBottom: 8 }}>Services</div>
+        <div style={{ fontSize: 13, color: "#e2e8f0", marginBottom: 10 }}>{order.description || "Auto repair service"}</div>
+        <div style={{ display: "flex", justifyContent: "space-between", fontSize: 13, marginBottom: 4 }}>
+          <span style={{ color: "#94a3b8" }}>Labor ({order.hours}h × ${hourlyRate}/h)</span>
+          <span style={{ fontWeight: 600 }}>${labor.toFixed(2)}</span>
+        </div>
+        <div style={{ display: "flex", justifyContent: "space-between", fontSize: 13 }}>
+          <span style={{ color: "#94a3b8" }}>Parts & Materials</span>
+          <span style={{ fontWeight: 600 }}>${order.partsCost.toFixed(2)}</span>
+        </div>
+        <div style={{ borderTop: "1px solid #2d3148", marginTop: 10, paddingTop: 10, display: "flex", justifyContent: "space-between" }}>
+          <span style={{ fontWeight: 700, fontSize: 15 }}>TOTAL</span>
+          <span style={{ fontWeight: 700, color: "#a855f7", fontSize: 20 }}>${total.toFixed(2)}</span>
+        </div>
+      </div>
+      <div style={{ background: "#1c1208", border: "1px solid #78350f", borderRadius: 10, padding: 12, marginBottom: 16 }}>
+        <div style={{ fontSize: 11, fontWeight: 700, color: "#f59e0b", marginBottom: 4 }}>⚠️ INSURANCE DISCLAIMER</div>
+        <div style={{ fontSize: 11, color: "#d97706", lineHeight: 1.6 }}>The vehicle owner must maintain valid insurance. Sprinter Express Auto Service is <strong>NOT responsible</strong> for any damage, theft, or loss while on the premises.</div>
+      </div>
+      <div style={{ fontSize: 10, color: "#475569", textAlign: "center", marginBottom: 14 }}>Thank you for choosing Sprinter Express · Design by Anatoliy Ostapenko</div>
+      <div style={{ display: "flex", gap: 8 }}>
+        <Btn onClick={handlePrint} color="#0f766e" style={{ flex: 1 }}>🖨️ Print Invoice</Btn>
+        <Btn onClick={onClose} color="#374151" style={{ flex: 1 }}>✕ Close</Btn>
+      </div>
+    </Modal>
+  );
+}
+
+// ── New / Edit Order (3 steps) ─────────────────────────
+function OrderModal({ onClose, onSave, techs, hourlyRate, initial }) {
+  const editing = !!initial;
+  const [step, setStep] = useState(editing ? 2 : 1);
+  const [agreed, setAgreed] = useState(editing ? true : false);
+  const [f, setF] = useState(initial || { customer: "", car: "", vin: "", technician: "", hours: "", partsCost: "", description: "", date: new Date().toISOString().split("T")[0] });
+  const set = k => v => setF(p => ({ ...p, [k]: v }));
+  const labor = (parseFloat(f.hours) || 0) * hourlyRate;
+  const parts = parseFloat(f.partsCost) || 0;
+  const save = () => { onSave({ ...f, hours: parseFloat(f.hours) || 0, partsCost: parseFloat(f.partsCost) || 0, status: initial?.status || "Waiting", insuranceConfirmed: true }); onClose(); };
+
+  return (
+    <Modal title={editing ? "✏️ Edit Order" : `New Order — Step ${step}/3`} onClose={onClose}>
+      {step === 1 && !editing && (
+        <>
+          <div style={{ background: "#1c1208", border: "1px solid #78350f", borderRadius: 10, padding: 16, marginBottom: 16 }}>
+            <div style={{ fontSize: 13, fontWeight: 700, color: "#f59e0b", marginBottom: 10 }}>⚠️ MANDATORY INSURANCE NOTICE</div>
+            <div style={{ fontSize: 13, color: "#d97706", lineHeight: 1.7 }}>Each vehicle must have <strong style={{ color: "#fbbf24" }}>valid insurance from the owner</strong>.<br/><br/>Sprinter Express Auto Service bears <strong style={{ color: "#fbbf24" }}>NO responsibility for any damage, theft, or loss</strong> while on the premises.<br/><br/>Customer must confirm before proceeding.</div>
+            <label style={{ display: "flex", alignItems: "center", gap: 10, marginTop: 14, cursor: "pointer" }}>
+              <input type="checkbox" checked={agreed} onChange={e => setAgreed(e.target.checked)} style={{ width: 18, height: 18, accentColor: "#f59e0b" }} />
+              <span style={{ fontSize: 13, color: "#fbbf24", fontWeight: 600 }}>Customer confirmed insurance & disclaimer</span>
+            </label>
+          </div>
+          <Btn onClick={() => agreed && setStep(2)} color={agreed ? "#2563eb" : "#374151"} full style={{ opacity: agreed ? 1 : 0.5 }}>Next: Customer Info →</Btn>
+        </>
+      )}
+      {(step === 2 || editing) && !editing && (
+        <>
+          <Field label="Customer Name" value={f.customer} onChange={set("customer")} placeholder="Full name" />
+          <Field label="Vehicle (Make Model Year)" value={f.car} onChange={set("car")} placeholder="e.g. Toyota Camry 2019" />
+          <Field label="VIN Number" value={f.vin} onChange={set("vin")} placeholder="17-character VIN" />
+          <Field label="Date" value={f.date} onChange={set("date")} type="date" />
+          <div style={{ display: "flex", gap: 8 }}>
+            <Btn onClick={() => setStep(1)} color="#374151" style={{ flex: 1 }}>← Back</Btn>
+            <Btn onClick={() => setStep(3)} style={{ flex: 1 }}>Next: Work →</Btn>
+          </div>
+        </>
+      )}
+      {(step === 3 || editing) && (
+        <>
+          {editing && <>
+            <Field label="Customer Name" value={f.customer} onChange={set("customer")} placeholder="Full name" />
+            <Field label="Vehicle" value={f.car} onChange={set("car")} placeholder="Make Model Year" />
+            <Field label="VIN" value={f.vin} onChange={set("vin")} placeholder="17-char VIN" />
+            <Field label="Date" value={f.date} onChange={set("date")} type="date" />
+          </>}
+          <div style={{ marginBottom: 12 }}>
+            <div style={{ fontSize: 11, color: "#94a3b8", marginBottom: 4 }}>Assign Technician</div>
+            <select value={f.technician} onChange={e => set("technician")(e.target.value)}
+              style={{ width: "100%", background: "#0f1117", border: "1px solid #2d3148", borderRadius: 8, padding: "10px 12px", color: "#e2e8f0", fontSize: 13 }}>
+              <option value="">Select technician...</option>
+              {techs.filter(t => t.active).map(t => <option key={t.id} value={t.name}>{t.name} — {t.specialty}</option>)}
+            </select>
+          </div>
+          <Field label={`Labor Hours (rate: $${hourlyRate}/h)`} value={f.hours} onChange={set("hours")} type="number" placeholder="0.0" />
+          <Field label="Parts & Materials Cost ($)" value={f.partsCost} onChange={set("partsCost")} type="number" placeholder="0.00" />
+          <Field label="Work Description" value={f.description} onChange={set("description")} placeholder="Describe the work..." />
+          {(labor + parts) > 0 && (
+            <div style={{ background: "#0f1117", borderRadius: 8, padding: 12, marginBottom: 12 }}>
+              <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12, color: "#94a3b8", marginBottom: 4 }}>
+                <span>Labor ({f.hours || 0}h × ${hourlyRate})</span><span>${labor.toFixed(2)}</span>
+              </div>
+              <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12, color: "#94a3b8", marginBottom: 6 }}>
+                <span>Parts</span><span>${parts.toFixed(2)}</span>
+              </div>
+              <div style={{ display: "flex", justifyContent: "space-between", fontWeight: 700, color: "#a855f7", fontSize: 15 }}>
+                <span>Estimated Total</span><span>${(labor + parts).toFixed(2)}</span>
+              </div>
+            </div>
+          )}
+          <div style={{ display: "flex", gap: 8 }}>
+            {!editing && <Btn onClick={() => setStep(2)} color="#374151" style={{ flex: 1 }}>← Back</Btn>}
+            {editing && <Btn onClick={onClose} color="#374151" style={{ flex: 1 }}>Cancel</Btn>}
+            <Btn onClick={save} color="#22c55e" style={{ flex: 1 }}>✓ {editing ? "Save Changes" : "Create Order"}</Btn>
+          </div>
+        </>
+      )}
+    </Modal>
+  );
+}
+
+// ── Technician Modal ───────────────────────────────────
+function TechModal({ onClose, onSave, initial }) {
+  const [f, setF] = useState(initial || { name: "", specialty: "", phone: "", active: true });
+  const set = k => v => setF(p => ({ ...p, [k]: v }));
+  const specialties = ["Engine & Transmission", "Brakes & Suspension", "Electrical Systems", "Body & Paint", "AC & Heating", "Diagnostics", "General Repair"];
+  return (
+    <Modal title={initial ? "✏️ Edit Technician" : "➕ Add Technician"} onClose={onClose}>
+      <Field label="Full Name" value={f.name} onChange={set("name")} placeholder="e.g. John Smith" />
+      <Field label="Specialty" value={f.specialty} onChange={set("specialty")} options={specialties} />
+      <Field label="Phone" value={f.phone} onChange={set("phone")} placeholder="+1 555 000 0000" type="tel" />
+      <div style={{ marginBottom: 16 }}>
+        <div style={{ fontSize: 11, color: "#94a3b8", marginBottom: 8 }}>Status</div>
+        <div style={{ display: "flex", gap: 8 }}>
+          {[true, false].map(v => (
+            <button key={String(v)} onClick={() => set("active")(v)} style={{
+              flex: 1, padding: "8px", borderRadius: 8, border: "2px solid", cursor: "pointer", fontWeight: 600, fontSize: 13,
+              borderColor: f.active === v ? (v ? "#22c55e" : "#ef4444") : "#2d3148",
+              background: f.active === v ? (v ? "#22c55e22" : "#ef444422") : "#0f1117",
+              color: f.active === v ? (v ? "#22c55e" : "#ef4444") : "#64748b"
+            }}>{v ? "✓ Active" : "✕ Off Duty"}</button>
+          ))}
+        </div>
+      </div>
+      <div style={{ display: "flex", gap: 8 }}>
+        <Btn onClick={onClose} color="#374151" style={{ flex: 1 }}>Cancel</Btn>
+        <Btn onClick={() => { if (f.name) { onSave(f); onClose(); } }} color="#22c55e" style={{ flex: 1 }}>✓ Save</Btn>
+      </div>
+    </Modal>
+  );
+}
+
+// ── Customer Modal ─────────────────────────────────────
+function CustomerModal({ onClose, onSave, initial }) {
+  const [f, setF] = useState(initial || { name: "", phone: "", email: "", cars: "" });
+  const set = k => v => setF(p => ({ ...p, [k]: v }));
+  return (
+    <Modal title={initial ? "✏️ Edit Customer" : "➕ Add Customer"} onClose={onClose}>
+      <Field label="Full Name" value={f.name} onChange={set("name")} placeholder="e.g. John Smith" />
+      <Field label="Phone" value={f.phone} onChange={set("phone")} placeholder="+1 555 000 0000" type="tel" />
+      <Field label="Email" value={f.email} onChange={set("email")} placeholder="email@example.com" type="email" />
+      <Field label="Vehicle(s)" value={f.cars} onChange={set("cars")} placeholder="e.g. Toyota Camry 2019" />
+      <div style={{ display: "flex", gap: 8 }}>
+        <Btn onClick={onClose} color="#374151" style={{ flex: 1 }}>Cancel</Btn>
+        <Btn onClick={() => { if (f.name) { onSave(f); onClose(); } }} color="#22c55e" style={{ flex: 1 }}>✓ Save</Btn>
+      </div>
+    </Modal>
+  );
+}
+
+// ── Part Modal ─────────────────────────────────────────
+function PartModal({ onClose, onSave, initial }) {
+  const [f, setF] = useState(initial || { name: "", sku: "", stock: "", price: "", category: "" });
+  const set = k => v => setF(p => ({ ...p, [k]: v }));
+  const cats = ["Engine", "Brakes", "Ignition", "Body", "Electrical", "AC & Heating", "Transmission", "Suspension", "Other"];
+  return (
+    <Modal title={initial ? "✏️ Edit Part" : "➕ Add Part"} onClose={onClose}>
+      <Field label="Part Name" value={f.name} onChange={set("name")} placeholder="e.g. Oil Filter" />
+      <Field label="SKU / Part Number" value={f.sku} onChange={set("sku")} placeholder="e.g. OF-2234" />
+      <Field label="Category" value={f.category} onChange={set("category")} options={cats} />
+      <Field label="Stock Quantity" value={f.stock} onChange={set("stock")} type="number" placeholder="0" />
+      <Field label="Price ($)" value={f.price} onChange={set("price")} type="number" placeholder="0.00" />
+      <div style={{ display: "flex", gap: 8 }}>
+        <Btn onClick={onClose} color="#374151" style={{ flex: 1 }}>Cancel</Btn>
+        <Btn onClick={() => { if (f.name) { onSave({ ...f, stock: parseInt(f.stock) || 0, price: parseFloat(f.price) || 0 }); onClose(); } }} color="#22c55e" style={{ flex: 1 }}>✓ Save</Btn>
+      </div>
+    </Modal>
+  );
+}
+
+// ── Main App ───────────────────────────────────────────
+function App() {
+  const [tab, setTab] = useState("Orders");
+  const [orders, setOrders] = useState(initOrders);
+  const [parts, setParts] = useState(initParts);
+  const [techs, setTechs] = useState(initTechs);
+  const [customers, setCustomers] = useState(initCustomers);
+  const [orderFilter, setOrderFilter] = useState("All");
+  const [hourlyRate, setHourlyRate] = useState(85);
+  const [editingRate, setEditingRate] = useState(false);
+  const [tempRate, setTempRate] = useState("85");
+
+  // Modals
+  const [invoiceOrder, setInvoiceOrder] = useState(null);
+  const [orderModal, setOrderModal] = useState(null);   // null | "new" | order obj
+  const [techModal, setTechModal] = useState(null);
+  const [customerModal, setCustomerModal] = useState(null);
+  const [partModal, setPartModal] = useState(null);
+  const [confirm, setConfirm] = useState(null);         // { message, onYes }
+
+  const nextId = arr => arr.length ? Math.max(...arr.map(x => x.id)) + 1 : 1;
+
+  // Orders
+  const saveOrder = data => {
+    if (data.id) setOrders(p => p.map(o => o.id === data.id ? data : o));
+    else setOrders(p => [...p, { ...data, id: nextId(p), visits: undefined }]);
+  };
+  const deleteOrder = id => setConfirm({ message: "Delete this order?", onYes: () => { setOrders(p => p.filter(o => o.id !== id)); setConfirm(null); } });
+  const advanceStatus = id => setOrders(p => p.map(o => o.id === id && NEXT[o.status] ? { ...o, status: NEXT[o.status] } : o));
+  const cancelOrder = id => setOrders(p => p.map(o => o.id === id ? { ...o, status: "Cancelled" } : o));
+
+  // Techs
+  const saveTech = data => {
+    if (data.id) setTechs(p => p.map(t => t.id === data.id ? data : t));
+    else setTechs(p => [...p, { ...data, id: nextId(p), ordersToday: 0 }]);
+  };
+  const deleteTech = id => setConfirm({ message: "Remove this technician?", onYes: () => { setTechs(p => p.filter(t => t.id !== id)); setConfirm(null); } });
+
+  // Customers
+  const saveCustomer = data => {
+    if (data.id) setCustomers(p => p.map(c => c.id === data.id ? data : c));
+    else setCustomers(p => [...p, { ...data, id: nextId(p), visits: 0 }]);
+  };
+  const deleteCustomer = id => setConfirm({ message: "Remove this customer?", onYes: () => { setCustomers(p => p.filter(c => c.id !== id)); setConfirm(null); } });
+
+  // Parts
+  const savePart = data => {
+    if (data.id) setParts(p => p.map(x => x.id === data.id ? data : x));
+    else setParts(p => [...p, { ...data, id: nextId(p) }]);
+  };
+  const deletePart = id => setConfirm({ message: "Remove this part from inventory?", onYes: () => { setParts(p => p.filter(x => x.id !== id)); setConfirm(null); } });
+
+  const filtered = orderFilter === "All" ? orders : orders.filter(o => o.status === orderFilter);
+  const revenue = orders.filter(o => o.status === "Done").reduce((s, o) => s + o.partsCost + o.hours * hourlyRate, 0);
+
+  const tabs = [{ key: "Orders", icon: "📋" }, { key: "Parts", icon: "🔩" }, { key: "Technicians", icon: "🔧" }, { key: "Customers", icon: "👥" }];
+
+  return (
+    <div style={{ background: "#0f1117", minHeight: "100vh", maxWidth: 520, margin: "0 auto", position: "relative" }}>
+      <div style={{ textAlign: "center", padding: "5px 16px", fontSize: 10, color: "#475569" }}>
+        Design build by Anatoliy Ostapenko for Sprinter express only
+      </div>
+
+      {/* Sticky Header */}
+      <div style={{ background: "#1a1d2e", padding: "12px 16px 0", borderBottom: "1px solid #2d3148", position: "sticky", top: 0, zIndex: 50 }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 12 }}>
+          <span style={{ fontSize: 20 }}>🔧</span>
+          <span style={{ fontWeight: 700, fontSize: 17 }}>AutoService</span>
+          <span style={{ background: "#2563eb", color: "#fff", fontSize: 10, fontWeight: 700, padding: "2px 7px", borderRadius: 4 }}>PRO</span>
+          <div style={{ marginLeft: "auto" }}>
+            {editingRate ? (
+              <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                <span style={{ fontSize: 12, color: "#94a3b8" }}>$</span>
+                <input value={tempRate} onChange={e => setTempRate(e.target.value)} type="number"
+                  style={{ width: 60, background: "#0f1117", border: "1px solid #2563eb", borderRadius: 6, padding: "4px 8px", color: "#e2e8f0", fontSize: 13 }} />
+                <span style={{ fontSize: 12, color: "#94a3b8" }}>/h</span>
+                <Btn small onClick={() => { setHourlyRate(parseFloat(tempRate) || hourlyRate); setEditingRate(false); }} color="#22c55e">✓</Btn>
+                <Btn small onClick={() => setEditingRate(false)} color="#374151">✕</Btn>
+              </div>
+            ) : (
+              <button onClick={() => { setEditingRate(true); setTempRate(String(hourlyRate)); }}
+                style={{ background: "#2d3148", border: "none", color: "#94a3b8", borderRadius: 8, padding: "5px 12px", cursor: "pointer", fontSize: 12 }}>
+                ⚙️ ${hourlyRate}/h
+              </button>
+            )}
+          </div>
+        </div>
+        <div style={{ display: "flex" }}>
+          {tabs.map(t => (
+            <button key={t.key} onClick={() => setTab(t.key)} style={{
+              flex: 1, padding: "8px 4px", background: "none", border: "none", cursor: "pointer",
+              color: tab === t.key ? "#3b82f6" : "#94a3b8",
+              borderBottom: tab === t.key ? "2px solid #3b82f6" : "2px solid transparent",
+              fontWeight: tab === t.key ? 700 : 400, fontSize: 11,
+              display: "flex", flexDirection: "column", alignItems: "center", gap: 2
+            }}>
+              <span>{t.icon}</span><span>{t.key}</span>
+            </button>
+          ))}
+        </div>
+      </div>
+
+      <div style={{ padding: 14 }}>
+
+        {/* ── ORDERS TAB ── */}
+        {tab === "Orders" && (<>
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10, marginBottom: 14 }}>
+            {[
+              { icon: "⏳", label: "Waiting", value: orders.filter(o => o.status === "Waiting").length, color: "#f59e0b" },
+              { icon: "⚙️", label: "In Progress", value: orders.filter(o => o.status === "In Progress").length, color: "#3b82f6" },
+              { icon: "✅", label: "Completed", value: orders.filter(o => o.status === "Done").length, color: "#22c55e" },
+              { icon: "💰", label: "Revenue", value: `$${revenue.toFixed(2)}`, color: "#a855f7" },
+            ].map(c => (
+              <div key={c.label} style={{ background: "#1a1d2e", borderRadius: 12, padding: "12px 14px" }}>
+                <div style={{ fontSize: 18, marginBottom: 4 }}>{c.icon}</div>
+                <div style={{ fontSize: 22, fontWeight: 700, color: c.color }}>{c.value}</div>
+                <div style={{ fontSize: 11, color: "#94a3b8", marginTop: 2 }}>{c.label}</div>
+              </div>
+            ))}
+          </div>
+
+          <div style={{ display: "flex", gap: 6, marginBottom: 12, flexWrap: "wrap", alignItems: "center" }}>
+            {["All", "Waiting", "In Progress", "Done", "Cancelled"].map(f => (
+              <button key={f} onClick={() => setOrderFilter(f)} style={{
+                padding: "5px 10px", borderRadius: 20, border: "none", cursor: "pointer", fontSize: 11,
+                background: orderFilter === f ? "#2563eb" : "#1a1d2e",
+                color: orderFilter === f ? "#fff" : "#94a3b8", fontWeight: orderFilter === f ? 600 : 400
+              }}>{f}</button>
+            ))}
+            <Btn small onClick={() => setOrderModal("new")} style={{ marginLeft: "auto" }}>+ New Order</Btn>
+          </div>
+
+          {filtered.length === 0 && <div style={{ textAlign: "center", color: "#475569", padding: 40 }}>No orders found</div>}
+
+          {filtered.map(o => {
+            const total = o.hours * hourlyRate + o.partsCost;
+            return (
+              <div key={o.id} style={{ background: "#1a1d2e", borderRadius: 12, padding: 14, marginBottom: 10 }}>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 8 }}>
+                  <div>
+                    <div style={{ fontWeight: 700, fontSize: 15 }}>{o.customer}</div>
+                    <div style={{ color: "#94a3b8", fontSize: 11 }}>#{o.id} · {o.date}</div>
+                  </div>
+                  <span style={{ background: SC[o.status] + "22", color: SC[o.status], fontSize: 11, fontWeight: 700, padding: "3px 10px", borderRadius: 20 }}>{o.status}</span>
+                </div>
+                <div style={{ fontSize: 13, fontWeight: 600 }}>{o.car}</div>
+                <div style={{ fontSize: 10, color: "#64748b", marginBottom: 6 }}>{o.vin}</div>
+                {o.description && <div style={{ fontSize: 12, color: "#94a3b8", marginBottom: 8, lineHeight: 1.5 }}>{o.description}</div>}
+                <div style={{ background: "#0f1117", borderRadius: 8, padding: "8px 10px", marginBottom: 10 }}>
+                  <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12, color: "#64748b", marginBottom: 3 }}>
+                    <span>Labor ({o.hours}h × ${hourlyRate})</span><span>${(o.hours * hourlyRate).toFixed(2)}</span>
+                  </div>
+                  <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12, color: "#64748b", marginBottom: 6 }}>
+                    <span>Parts</span><span>${o.partsCost.toFixed(2)}</span>
+                  </div>
+                  <div style={{ display: "flex", justifyContent: "space-between", fontWeight: 700 }}>
+                    <span style={{ fontSize: 13 }}>Total</span>
+                    <span style={{ color: "#a855f7", fontSize: 15 }}>${total.toFixed(2)}</span>
+                  </div>
+                </div>
+                <div style={{ fontSize: 11, color: "#94a3b8", marginBottom: 10 }}>
+                  👨‍🔧 {o.technician}
+                  {o.insuranceConfirmed && <span style={{ color: "#22c55e", marginLeft: 8 }}>✓ Insurance</span>}
+                </div>
+                <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+                  {NEXT[o.status] && (
+                    <Btn small onClick={() => advanceStatus(o.id)} color={o.status === "Waiting" ? "#3b82f6" : "#22c55e"} style={{ flex: 1 }}>
+                      {NEXT_LABEL[o.status]}
+                    </Btn>
+                  )}
+                  <Btn small onClick={() => setInvoiceOrder(o)} color="#7c3aed" style={{ flex: 1 }}>🧾 Invoice</Btn>
+                  <Btn small onClick={() => setOrderModal(o)} color="#0369a1" style={{ flex: 1 }}>✏️ Edit</Btn>
+                  {o.status !== "Cancelled" && o.status !== "Done" && (
+                    <Btn small onClick={() => cancelOrder(o.id)} color="#78350f" style={{ flex: 1 }}>✕ Cancel</Btn>
+                  )}
+                  <Btn small onClick={() => deleteOrder(o.id)} color="#7f1d1d" style={{ flex: 1 }}>🗑 Delete</Btn>
+                </div>
+              </div>
+            );
+          })}
+        </>)}
+
+        {/* ── PARTS TAB ── */}
+        {tab === "Parts" && (<>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 14 }}>
+            <div style={{ fontWeight: 700, fontSize: 16 }}>Parts Inventory</div>
+            <Btn small onClick={() => setPartModal("new")}>+ Add Part</Btn>
+          </div>
+          {parts.length === 0 && <div style={{ textAlign: "center", color: "#475569", padding: 40 }}>No parts in inventory</div>}
+          {parts.map(p => (
+            <div key={p.id} style={{ background: "#1a1d2e", borderRadius: 12, padding: 14, marginBottom: 10 }}>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 6 }}>
+                <div>
+                  <div style={{ fontWeight: 600, fontSize: 14 }}>{p.name}</div>
+                  <div style={{ fontSize: 11, color: "#64748b" }}>{p.sku} · {p.category}</div>
+                </div>
+                <div style={{ textAlign: "right" }}>
+                  <div style={{ fontWeight: 700, color: "#22c55e", fontSize: 15 }}>${p.price.toFixed(2)}</div>
+                  <div style={{ fontSize: 11, color: p.stock <= 3 ? "#ef4444" : "#94a3b8" }}>{p.stock <= 3 ? "⚠️ " : ""}Stock: {p.stock}</div>
+                </div>
+              </div>
+              <div style={{ display: "flex", gap: 6, marginTop: 8 }}>
+                <Btn small onClick={() => setPartModal(p)} color="#0369a1" style={{ flex: 1 }}>✏️ Edit</Btn>
+                <Btn small onClick={() => deletePart(p.id)} color="#7f1d1d" style={{ flex: 1 }}>🗑 Delete</Btn>
+              </div>
+            </div>
+          ))}
+        </>)}
+
+        {/* ── TECHNICIANS TAB ── */}
+        {tab === "Technicians" && (<>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 14 }}>
+            <div style={{ fontWeight: 700, fontSize: 16 }}>Technicians</div>
+            <Btn small onClick={() => setTechModal("new")}>+ Add</Btn>
+          </div>
+          {techs.length === 0 && <div style={{ textAlign: "center", color: "#475569", padding: 40 }}>No technicians added yet</div>}
+          {techs.map(t => (
+            <div key={t.id} style={{ background: "#1a1d2e", borderRadius: 12, padding: 14, marginBottom: 10 }}>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 6 }}>
+                <div>
+                  <div style={{ fontWeight: 600, fontSize: 14 }}>{t.name}</div>
+                  <div style={{ fontSize: 12, color: "#94a3b8" }}>{t.specialty}</div>
+                  {t.phone && <div style={{ fontSize: 11, color: "#64748b", marginTop: 2 }}>📞 {t.phone}</div>}
+                  <div style={{ fontSize: 11, color: "#64748b", marginTop: 2 }}>Orders today: {t.ordersToday}</div>
+                </div>
+                <span style={{ background: t.active ? "#22c55e22" : "#ef444422", color: t.active ? "#22c55e" : "#ef4444", fontSize: 11, fontWeight: 700, padding: "4px 12px", borderRadius: 20 }}>
+                  {t.active ? "Active" : "Off"}
+                </span>
+              </div>
+              <div style={{ display: "flex", gap: 6, marginTop: 8 }}>
+                <Btn small onClick={() => setTechModal(t)} color="#0369a1" style={{ flex: 1 }}>✏️ Edit</Btn>
+                <Btn small onClick={() => deleteTech(t.id)} color="#7f1d1d" style={{ flex: 1 }}>🗑 Remove</Btn>
+              </div>
+            </div>
+          ))}
+        </>)}
+
+        {/* ── CUSTOMERS TAB ── */}
+        {tab === "Customers" && (<>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 14 }}>
+            <div style={{ fontWeight: 700, fontSize: 16 }}>Customers</div>
+            <Btn small onClick={() => setCustomerModal("new")}>+ Add</Btn>
+          </div>
+          {customers.length === 0 && <div style={{ textAlign: "center", color: "#475569", padding: 40 }}>No customers yet</div>}
+          {customers.map(c => (
+            <div key={c.id} style={{ background: "#1a1d2e", borderRadius: 12, padding: 14, marginBottom: 10 }}>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 6 }}>
+                <div style={{ fontWeight: 600, fontSize: 14 }}>{c.name}</div>
+                <span style={{ fontSize: 11, color: "#94a3b8" }}>Visits: {c.visits}</span>
+              </div>
+              {c.phone && <div style={{ fontSize: 13, color: "#94a3b8" }}>📞 {c.phone}</div>}
+              {c.email && <div style={{ fontSize: 12, color: "#64748b" }}>✉️ {c.email}</div>}
+              {c.cars && <div style={{ fontSize: 12, color: "#3b82f6", marginTop: 4 }}>🚗 {c.cars}</div>}
+              <div style={{ display: "flex", gap: 6, marginTop: 10 }}>
+                <Btn small onClick={() => setCustomerModal(c)} color="#0369a1" style={{ flex: 1 }}>✏️ Edit</Btn>
+                <Btn small onClick={() => deleteCustomer(c.id)} color="#7f1d1d" style={{ flex: 1 }}>🗑 Remove</Btn>
+              </div>
+            </div>
+          ))}
+        </>)}
+
+      </div>
+
+      {/* Modals */}
+      {invoiceOrder && <Invoice order={invoiceOrder} hourlyRate={hourlyRate} onClose={() => setInvoiceOrder(null)} />}
+      {orderModal && <OrderModal onClose={() => setOrderModal(null)} onSave={saveOrder} techs={techs} hourlyRate={hourlyRate} initial={orderModal === "new" ? null : orderModal} />}
+      {techModal && <TechModal onClose={() => setTechModal(null)} onSave={saveTech} initial={techModal === "new" ? null : techModal} />}
+      {customerModal && <CustomerModal onClose={() => setCustomerModal(null)} onSave={saveCustomer} initial={customerModal === "new" ? null : customerModal} />}
+      {partModal && <PartModal onClose={() => setPartModal(null)} onSave={savePart} initial={partModal === "new" ? null : partModal} />}
+      {confirm && <Confirm message={confirm.message} onYes={confirm.onYes} onNo={() => setConfirm(null)} />}
+    </div>
+  );
+}
+
+ReactDOM.createRoot(document.getElementById("root")).render(<App />);
+</script>
+</body>
+</html>
